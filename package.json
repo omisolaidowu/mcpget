@@ -1,6 +1,6 @@
 {
   "name": "@idowupaul/mcpget",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server installer CLI for Claude, Codex, and Cursor.",
   "license": "MIT",
   "type": "module",
