@@ -46,6 +46,56 @@ mcpget doctor
 
 Replace `<server-id>` with an identifier returned by the search command. Installation requires confirmation and may prompt you for supported credentials.
 
+## Finding and installing MCP servers
+
+MCPGet supports different ways to identify an MCP server, depending on what you already know about the service or package.
+
+**Install using a service or tool name**
+
+```bash
+mcpget install notion codex
+mcpget install github claude
+```
+
+**Install using a website URL or domain**
+
+```bash
+mcpget install www.notion.com codex
+mcpget install github.com claude
+```
+
+**Install using an npm package reference**
+
+```bash
+mcpget install npm:@thunderbit-mcp-server codex
+```
+
+**Search for candidates before installing**
+
+```bash
+mcpget search notion
+mcpget search github.com
+```
+
+When multiple candidates match, MCPGet presents the available options so you can choose the server you want to install.
+
+**Inspect a candidate before installing**
+
+```bash
+mcpget inspect <server-id>
+mcpget install <server-id> cursor
+```
+
+Replace `<server-id>` with the identifier of the selected candidate returned by search.
+
+**Install a Python-based server using ephemeral mode**
+
+```bash
+mcpget install <server-id> codex --ephemeral
+```
+
+Supported Python and OCI sources require explicit ephemeral mode.
+
 ## Features
 
 - **Discovery** — Find and evaluate MCP server candidates using the [Official MCP Registry](https://registry.modelcontextprotocol.io/).
@@ -125,7 +175,7 @@ These checks do not guarantee successful authentication, application-level funct
 Clone the repository and run MCPGet from source:
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/omisolaidowu/mcpget.git
 cd mcpget
 
 npm install
