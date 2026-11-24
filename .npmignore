@@ -1,0 +1,10 @@
+src/
+tests/
+docs/
+.github/
+*.config.ts
+eslint.config.js
+tsconfig.json
+vitest.config.ts
+CONTRIBUTING.md
+AGENTS.md

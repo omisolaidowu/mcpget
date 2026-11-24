@@ -1,0 +1,54 @@
+{
+  "name": "@idowupaul/mcpget",
+  "version": "0.1.0",
+  "description": "MCP server installer CLI for Claude, Codex, and Cursor.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "mcpget": "dist/cli/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "installer",
+    "claude",
+    "codex",
+    "cursor"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "tsx src/cli/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "commander": "^14.0.0",
+    "smol-toml": "^1.9.1",
+    "tldts": "^7.5.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.1.12"
+  }
+}

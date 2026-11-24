@@ -1,0 +1,42 @@
+{
+  "servers": [
+    {
+      "server": {
+        "name": "io.github.linear/mcp-server",
+        "title": "Linear MCP Server",
+        "description": "Connects to the Linear workspace API.",
+        "version": "1.2.0",
+        "repository": { "url": "https://github.com/linear/mcp-server", "source": "github" },
+        "websiteUrl": "https://linear.app/developers",
+        "packages": [
+          {
+            "registryType": "npm",
+            "identifier": "@linear/server",
+            "version": "1.2.0",
+            "runtimeHint": "npx",
+            "transport": { "type": "stdio" },
+            "environmentVariables": [
+              {
+                "name": "LINEAR_API_KEY",
+                "isRequired": true,
+                "isSecret": true,
+                "description": "Token for connecting to a workspace.",
+                "value": "must-never-be-normalized"
+              }
+            ]
+          }
+        ],
+        "remotes": [{ "type": "streamable-http", "url": "https://linear.app/mcp" }]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "isLatest": true
+        }
+      }
+    },
+    { "server": { "title": "Malformed entry without a name" } }
+  ],
+  "metadata": { "count": 2, "nextCursor": null }
+}
