@@ -40,6 +40,7 @@ async function isolatedEnvironment(mode = "primary") {
     USERPROFILE: home,
     APPDATA: join(home, "AppData", "Roaming"),
     LOCALAPPDATA: join(home, "AppData", "Local"),
+    XDG_CONFIG_HOME: join(home, ".config"),
     CODEX_HOME: codexHome,
     MCPGET_CLAUDE_CONFIG_PATH: join(
       home,

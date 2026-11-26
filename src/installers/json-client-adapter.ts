@@ -504,10 +504,10 @@ export function resolveClaudeConfigPath(
   const platform = options.platform ?? process.platform;
   const home = options.home ?? homedir();
   const joinPath = platform === "win32" ? path.win32.join : path.posix.join;
+  const explicitPath =
+    options.claudeConfigPath ?? process.env.MCPGET_CLAUDE_CONFIG_PATH;
+  if (explicitPath) return explicitPath;
   if (platform === "win32") {
-    const explicitPath =
-      options.claudeConfigPath ?? process.env.MCPGET_CLAUDE_CONFIG_PATH;
-    if (explicitPath) return explicitPath;
     const localAppData =
       options.localAppData ??
       process.env.LOCALAPPDATA ??

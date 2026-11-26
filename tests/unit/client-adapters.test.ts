@@ -138,6 +138,38 @@ describe("JSON client configuration paths and persisted verification", () => {
     );
   });
 
+  it("does not let an inherited XDG_CONFIG_HOME escape an isolated Linux Claude test environment", () => {
+    const previousXdg = process.env.XDG_CONFIG_HOME;
+    const previousExplicit = process.env.MCPGET_CLAUDE_CONFIG_PATH;
+    const isolatedHome = "/tmp/mcpget-isolated-home";
+    const isolatedExplicit = `${isolatedHome}/.config/Claude/claude_desktop_config.json`;
+    try {
+      process.env.XDG_CONFIG_HOME = "/home/runner/unrelated/.config";
+      process.env.MCPGET_CLAUDE_CONFIG_PATH = isolatedExplicit;
+      expect(
+        resolveClaudeConfigPath({
+          platform: "linux",
+          home: isolatedHome,
+        }),
+      ).toBe(isolatedExplicit);
+
+      delete process.env.MCPGET_CLAUDE_CONFIG_PATH;
+      expect(
+        resolveClaudeConfigPath({
+          platform: "linux",
+          home: isolatedHome,
+          xdgConfigHome: `${isolatedHome}/.config`,
+        }),
+      ).toBe(`${isolatedHome}/.config/Claude/claude_desktop_config.json`);
+    } finally {
+      if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousXdg;
+      if (previousExplicit === undefined)
+        delete process.env.MCPGET_CLAUDE_CONFIG_PATH;
+      else process.env.MCPGET_CLAUDE_CONFIG_PATH = previousExplicit;
+    }
+  });
+
   it("uses documented Claude and Cursor user paths across Windows, macOS, and Linux", () => {
     expect(
       resolveClaudeConfigPath({
