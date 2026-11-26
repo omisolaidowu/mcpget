@@ -13,6 +13,7 @@ export interface RegistryInputRequirement {
   name: string;
   required?: boolean;
   secret?: boolean;
+  kind?: "secret" | "directory_path" | "configuration";
   description?: string;
   deployment: "local-package" | "remote-endpoint";
 }

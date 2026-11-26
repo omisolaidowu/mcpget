@@ -10,6 +10,10 @@ declare module "commander" {
     opts(): Record<string, unknown>;
     parse(args?: readonly string[]): this;
     parseAsync(args?: readonly string[]): Promise<this>;
+    configureOutput(options: { writeErr?: (message: string) => void }): this;
+    exitOverride(
+      callback?: (error: Error & { code?: string; exitCode?: number }) => void,
+    ): this;
     readonly commands: Command[];
   }
 }

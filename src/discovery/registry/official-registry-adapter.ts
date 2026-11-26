@@ -1,15 +1,41 @@
 import type { ServerCandidate } from "../../models/server-candidate.js";
+import {
+  hasCredentialLikeUrlFragment,
+  hasSensitiveUrlQuery,
+  parsePublicHttpsEndpoint,
+} from "../../security/remote-endpoint.js";
 
 const REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io";
 const REGISTRY_SERVERS_PATH = "/v0.1/servers";
 const PAGE_SIZE = 100;
 const MAX_PAGES = 100;
 
+export type RegistryErrorReason =
+  | "invalid_query"
+  | "repeated_cursor"
+  | "http_failure"
+  | "network_timeout"
+  | "transport_failure"
+  | "invalid_response"
+  | "safety_limit_reached";
+
 export class RegistryError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(
+    message: string,
+    options?: ErrorOptions,
+    readonly reason: RegistryErrorReason = "invalid_response",
+  ) {
     super(message, options);
     this.name = "RegistryError";
   }
+}
+
+export interface RegistrySearchResult {
+  candidates: ServerCandidate[];
+  status: "complete" | "partial";
+  terminationReason: "cursor_exhausted" | "page_limit_reached";
+  pagesFetched: number;
+  safetyLimitReached: boolean;
 }
 
 interface RegistryAdapterOptions {
@@ -31,47 +57,82 @@ export class OfficialRegistryAdapter {
   constructor(options: RegistryAdapterOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 10_000;
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
-      throw new RangeError("Registry request timeout must be a positive finite number.");
+      throw new RangeError(
+        "Registry request timeout must be a positive finite number.",
+      );
     }
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.baseUrl = options.baseUrl ?? REGISTRY_BASE_URL;
   }
 
   async searchByName(name: string): Promise<ServerCandidate[]> {
+    const result = await this.searchByNameWithMetadata(name);
+    if (result.safetyLimitReached) {
+      throw new RegistryError(
+        `Registry search exceeded the safety limit of ${MAX_PAGES} pages. Try a more specific service name.`,
+        undefined,
+        "safety_limit_reached",
+      );
+    }
+    return result.candidates;
+  }
+
+  async searchByNameWithMetadata(name: string): Promise<RegistrySearchResult> {
     const search = name.trim();
     if ([...search].length < 3) {
       throw new RegistryError(
         "The Official MCP Registry requires search terms to contain at least 3 characters. This service name is too short to search directly.",
+        undefined,
+        "invalid_query",
       );
     }
 
     const results: ServerCandidate[] = [];
     const seenCursors = new Set<string>();
     let cursor: string | undefined;
+    let pagesFetched = 0;
 
     for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber += 1) {
       const page = await this.fetchPage(search, cursor);
+      pagesFetched += 1;
       for (const record of page.servers) {
         const candidate = normalizeRegistryRecord(record, this.baseUrl);
         if (candidate) results.push(candidate);
       }
 
-      if (!page.nextCursor) return deduplicateCandidates(results);
+      if (!page.nextCursor) {
+        return {
+          candidates: deduplicateCandidates(results),
+          status: "complete",
+          terminationReason: "cursor_exhausted",
+          pagesFetched,
+          safetyLimitReached: false,
+        };
+      }
       if (seenCursors.has(page.nextCursor)) {
-        throw new RegistryError("The registry returned a repeated pagination cursor.");
+        throw new RegistryError(
+          "The registry returned a repeated pagination cursor.",
+          undefined,
+          "repeated_cursor",
+        );
       }
       seenCursors.add(page.nextCursor);
       cursor = page.nextCursor;
     }
 
-    throw new RegistryError(
-      `Registry search exceeded the safety limit of ${MAX_PAGES} pages. Try a more specific service name.`,
-    );
+    return {
+      candidates: deduplicateCandidates(results),
+      status: "partial",
+      terminationReason: "page_limit_reached",
+      pagesFetched,
+      safetyLimitReached: true,
+    };
   }
 
   async getByIdentifier(identifier: string): Promise<ServerCandidate> {
     const name = identifier.trim();
-    if (!name) throw new RegistryError("Enter a Registry server identifier to inspect.");
+    if (!name)
+      throw new RegistryError("Enter a Registry server identifier to inspect.");
     const url = new URL(
       `${REGISTRY_SERVERS_PATH}/${encodeURIComponent(name)}/versions/latest`,
       this.baseUrl,
@@ -79,12 +140,17 @@ export class OfficialRegistryAdapter {
     const body = await this.requestJson(url);
     const candidate = normalizeRegistryRecord(body, this.baseUrl);
     if (!candidate) {
-      throw new RegistryError("The Registry did not return a valid server record for that identifier.");
+      throw new RegistryError(
+        "The Registry did not return a valid server record for that identifier.",
+      );
     }
     return candidate;
   }
 
-  private async fetchPage(search: string, cursor?: string): Promise<RegistryPage> {
+  private async fetchPage(
+    search: string,
+    cursor?: string,
+  ): Promise<RegistryPage> {
     const url = new URL(REGISTRY_SERVERS_PATH, this.baseUrl);
     url.searchParams.set("search", search);
     url.searchParams.set("version", "latest");
@@ -103,11 +169,21 @@ export class OfficialRegistryAdapter {
       });
     } catch (error) {
       if (error instanceof Error && error.name === "TimeoutError") {
-        throw new RegistryError(`Registry request timed out after ${this.timeoutMs} ms.`, {
-          cause: error,
-        });
+        throw new RegistryError(
+          `Registry request timed out after ${this.timeoutMs} ms.`,
+          {
+            cause: error,
+          },
+          "network_timeout",
+        );
       }
-      throw new RegistryError("Could not reach the Official MCP Registry.", { cause: error });
+      throw new RegistryError(
+        "Could not reach the Official MCP Registry.",
+        {
+          cause: error,
+        },
+        "transport_failure",
+      );
     }
 
     if (!response.ok) {
@@ -115,14 +191,20 @@ export class OfficialRegistryAdapter {
         response.status === 429
           ? "The registry is rate limiting requests. Wait a moment and try again."
           : `The registry returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`;
-      throw new RegistryError(detail);
+      throw new RegistryError(detail, undefined, "http_failure");
     }
 
     let body: unknown;
     try {
       body = await response.json();
     } catch (error) {
-      throw new RegistryError("The registry returned invalid JSON.", { cause: error });
+      throw new RegistryError(
+        "The registry returned invalid JSON.",
+        {
+          cause: error,
+        },
+        "invalid_response",
+      );
     }
 
     return body;
@@ -131,21 +213,29 @@ export class OfficialRegistryAdapter {
 
 export function parseRegistryPage(body: unknown): RegistryPage {
   if (!isRecord(body) || !Array.isArray(body.servers)) {
-    throw new RegistryError("The registry response is missing its servers list.");
+    throw new RegistryError(
+      "The registry response is missing its servers list.",
+    );
   }
 
   if (body.metadata != null && !isRecord(body.metadata)) {
-    throw new RegistryError("The registry response contains invalid pagination metadata.");
+    throw new RegistryError(
+      "The registry response contains invalid pagination metadata.",
+    );
   }
 
   let nextCursor: string | undefined;
   if (isRecord(body.metadata) && body.metadata.nextCursor != null) {
     if (typeof body.metadata.nextCursor !== "string") {
-      throw new RegistryError("The registry response contains an invalid pagination cursor.");
+      throw new RegistryError(
+        "The registry response contains an invalid pagination cursor.",
+      );
     }
     nextCursor = body.metadata.nextCursor || undefined;
   }
-  return nextCursor ? { servers: body.servers, nextCursor } : { servers: body.servers };
+  return nextCursor
+    ? { servers: body.servers, nextCursor }
+    : { servers: body.servers };
 }
 
 export function normalizeRegistryRecord(
@@ -180,7 +270,8 @@ export function normalizeRegistryRecord(
       isRecord(item.transport) ? stringField(item.transport.url) : undefined,
     ),
     ...remoteRecords.map((item) => stringField(item.url)),
-  ].filter((value): value is string => Boolean(value))
+  ]
+    .filter((value): value is string => Boolean(value))
     .map(safeRegistryEndpoint)
     .filter((value): value is string => Boolean(value));
   const packageReferences = packageRecords.map((item) => {
@@ -195,7 +286,8 @@ export function normalizeRegistryRecord(
       ...(runtimeHint ? { runtimeHint } : {}),
     };
   });
-  const deploymentModels: ServerCandidate["operational"]["deploymentModels"] = [];
+  const deploymentModels: ServerCandidate["operational"]["deploymentModels"] =
+    [];
   if (packageRecords.length > 0) deploymentModels.push("Local package");
   if (remoteRecords.length > 0) deploymentModels.push("Remote endpoint");
 
@@ -224,7 +316,8 @@ export function normalizeRegistryRecord(
   };
 
   const namespaceSeparator = name.lastIndexOf("/");
-  if (namespaceSeparator > 0) candidate.registryNamespace = name.slice(0, namespaceSeparator);
+  if (namespaceSeparator > 0)
+    candidate.registryNamespace = name.slice(0, namespaceSeparator);
   if (officialMetadata) {
     const registryStatus = stringField(officialMetadata.status);
     const publishedAt = stringField(officialMetadata.publishedAt);
@@ -232,7 +325,8 @@ export function normalizeRegistryRecord(
     if (registryStatus) candidate.registryStatus = registryStatus;
     if (publishedAt) candidate.publishedAt = publishedAt;
     if (updatedAt) candidate.updatedAt = updatedAt;
-    if (typeof officialMetadata.isLatest === "boolean") candidate.isLatest = officialMetadata.isLatest;
+    if (typeof officialMetadata.isLatest === "boolean")
+      candidate.isLatest = officialMetadata.isLatest;
   }
 
   const title = stringField(server.title);
@@ -252,21 +346,26 @@ export function normalizeRegistryRecord(
   return candidate;
 }
 
-function deduplicateCandidates(candidates: ServerCandidate[]): ServerCandidate[] {
+function deduplicateCandidates(
+  candidates: ServerCandidate[],
+): ServerCandidate[] {
   const byId = new Map<string, ServerCandidate>();
-  for (const candidate of candidates) byId.set(candidate.registryIdentifier, candidate);
+  for (const candidate of candidates)
+    byId.set(candidate.registryIdentifier, candidate);
   return [...byId.values()];
 }
 
 function safeHttpUrl(value: string): string | undefined {
   try {
     const url = new URL(value);
-    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return undefined;
-    for (const key of [...url.searchParams.keys()]) {
-      if (/token|secret|key|auth|password|credential|session|cookie|signature|assertion|bearer|^code$/i.test(key)) {
-        url.searchParams.delete(key);
-      }
-    }
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      url.username ||
+      url.password ||
+      hasSensitiveUrlQuery(url) ||
+      hasCredentialLikeUrlFragment(url)
+    )
+      return undefined;
     url.hash = "";
     return url.toString();
   } catch {
@@ -275,7 +374,11 @@ function safeHttpUrl(value: string): string | undefined {
 }
 
 function safeRegistryEndpoint(value: string): string | undefined {
-  return safeHttpUrl(value);
+  try {
+    return parsePublicHttpsEndpoint(value).toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function parseInputRequirements(
@@ -287,13 +390,19 @@ function parseInputRequirements(
     const name = stringField(item.name);
     if (!name) return [];
     const description = stringField(item.description);
-    return [{
-      name,
-      ...(typeof item.isRequired === "boolean" ? { required: item.isRequired } : {}),
-      ...(typeof item.isSecret === "boolean" ? { secret: item.isSecret } : {}),
-      ...(description ? { description } : {}),
-      deployment,
-    }];
+    return [
+      {
+        name,
+        ...(typeof item.isRequired === "boolean"
+          ? { required: item.isRequired }
+          : {}),
+        ...(typeof item.isSecret === "boolean"
+          ? { secret: item.isSecret }
+          : {}),
+        ...(description ? { description } : {}),
+        deployment,
+      },
+    ];
   });
 }
 
@@ -305,13 +414,19 @@ function parseNamedInputRequirements(
   return Object.entries(value).flatMap(([name, input]) => {
     if (!isRecord(input)) return [];
     const description = stringField(input.description);
-    return [{
-      name,
-      ...(typeof input.isRequired === "boolean" ? { required: input.isRequired } : {}),
-      ...(typeof input.isSecret === "boolean" ? { secret: input.isSecret } : {}),
-      ...(description ? { description } : {}),
-      deployment,
-    }];
+    return [
+      {
+        name,
+        ...(typeof input.isRequired === "boolean"
+          ? { required: input.isRequired }
+          : {}),
+        ...(typeof input.isSecret === "boolean"
+          ? { secret: input.isSecret }
+          : {}),
+        ...(description ? { description } : {}),
+        deployment,
+      },
+    ];
   });
 }
 

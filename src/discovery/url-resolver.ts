@@ -20,6 +20,20 @@ const knownProducts: KnownProduct[] = [
     shorthand: ["notion"],
   },
   {
+    name: "GitHub",
+    canonicalDomain: "github.com",
+    aliases: ["github"],
+    domains: ["github.com"],
+    shorthand: ["github"],
+  },
+  {
+    name: "Slack",
+    canonicalDomain: "slack.com",
+    aliases: ["slack"],
+    domains: ["slack.com"],
+    shorthand: ["slack"],
+  },
+  {
     name: "Linear",
     canonicalDomain: "linear.app",
     aliases: ["linear"],
@@ -58,7 +72,9 @@ export function resolveServiceIdentity(input: string): ServiceIdentity {
     throw new UrlResolutionError("Only http and https URLs are supported.");
   }
   if (url.username || url.password) {
-    throw new UrlResolutionError("Do not include account credentials in the URL.");
+    throw new UrlResolutionError(
+      "Do not include account credentials in the URL.",
+    );
   }
 
   const hostname = domainToASCII(url.hostname.replace(/\.$/, "")).toLowerCase();
@@ -74,7 +90,9 @@ export function resolveServiceIdentity(input: string): ServiceIdentity {
     !hostname.endsWith(".localhost") &&
     !isValidDnsHostname(hostname)
   ) {
-    throw new UrlResolutionError("The URL must contain a valid DNS hostname or IP address.");
+    throw new UrlResolutionError(
+      "The URL must contain a valid DNS hostname or IP address.",
+    );
   }
   const registrableDomain = parsed.domain ?? hostname;
   const knownProduct = knownProducts.find(
@@ -89,10 +107,31 @@ export function resolveServiceIdentity(input: string): ServiceIdentity {
     isIP(hostname) !== 0 ||
     parsed.isIp === true;
 
-  const productName = knownProduct?.aliases[0] ?? domain.split(".")[0]?.toLowerCase() ?? hostname;
+  const productName =
+    knownProduct?.aliases[0] ?? domain.split(".")[0]?.toLowerCase() ?? hostname;
   const productAliases = knownProduct?.aliases ?? [productName];
-  const domains = knownProduct?.domains ?? [...new Set([registrableDomain, hostname])];
-  const registrySearchTerms = [...new Set([productName, ...productAliases])];
+  const domains = knownProduct?.domains ?? [
+    ...new Set([registrableDomain, hostname]),
+  ];
+  const isDomainHostname =
+    hostname.includes(".") && isIP(hostname) === 0 && parsed.isIp !== true;
+  const registrySearchTerms = isDomainHostname
+    ? knownProduct
+      ? [
+          ...new Set(
+            [knownProduct.aliases[0], ...knownProduct.shorthand].filter(
+              (term): term is string => Boolean(term),
+            ),
+          ),
+        ]
+      : parsed.isIcann === true
+        ? [
+            parsed.domainWithoutSuffix ??
+              registrableDomain.split(".")[0]?.toLowerCase() ??
+              hostname.replace(/^www\./, ""),
+          ].filter((term): term is string => Boolean(term))
+        : [hostname.replace(/^www\./, "")]
+    : [...new Set([productName, ...productAliases])];
   return {
     hostname,
     domain,
@@ -107,9 +146,12 @@ export function resolveServiceIdentity(input: string): ServiceIdentity {
 
 function isValidDnsHostname(hostname: string): boolean {
   if (hostname.length > 253) return false;
-  return hostname.split(".").every((label) =>
-    label.length > 0 &&
-    label.length <= 63 &&
-    /^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i.test(label),
-  );
+  return hostname
+    .split(".")
+    .every(
+      (label) =>
+        label.length > 0 &&
+        label.length <= 63 &&
+        /^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i.test(label),
+    );
 }

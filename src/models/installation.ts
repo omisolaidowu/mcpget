@@ -1,6 +1,12 @@
-import type { ClientId } from "../installers/types.js";
+import type { ClientId, ConfigurationScope } from "../installers/types.js";
 
-export type InstallationStepStatus = "completed" | "not_applicable" | "not_verified" | "authentication_required" | "setup_required" | "failed";
+export type InstallationStepStatus =
+  | "completed"
+  | "not_applicable"
+  | "not_verified"
+  | "authentication_required"
+  | "setup_required"
+  | "failed";
 export interface InstallationStep {
   status: InstallationStepStatus;
   detail: string;
@@ -16,9 +22,13 @@ export interface InstallationRecord {
   installationPath?: string;
   packageIdentifier?: string;
   installedVersion?: string;
+  lifecycleScriptsEnabled?: boolean;
+  remoteEndpoint?: string;
+  remoteEndpointTrust?: "pending" | "public_https" | "rejected";
   configName: string;
   configPath: string;
-  configScope: "user";
+  configScope?: ConfigurationScope;
+  projectRoot?: string;
   createdAt: string;
   states: {
     resolved: InstallationStep;
@@ -39,23 +49,54 @@ export function pendingStep(detail = "Not checked."): InstallationStep {
   return { status: "not_verified", detail };
 }
 
-export function createInstallationRecord(input: Omit<InstallationRecord, "states" | "createdAt">): InstallationRecord {
+export function createInstallationRecord(
+  input: Omit<InstallationRecord, "states" | "createdAt">,
+): InstallationRecord {
   const now = new Date().toISOString();
-  const nA = (detail: string): InstallationStep => ({ status: "not_applicable", detail });
+  const nA = (detail: string): InstallationStep => ({
+    status: "not_applicable",
+    detail,
+  });
   return {
     ...input,
     createdAt: now,
     states: {
-      resolved: { status: "completed", detail: "Server source and client target resolved.", at: now },
+      resolved: {
+        status: "completed",
+        detail: "Server source and client target resolved.",
+        at: now,
+      },
       install_confirmed: pendingStep("Awaiting user approval."),
-      installed: input.strategy === "remote" ? nA("Remote server; no local package installation applies.") : input.strategy === "ephemeral" ? nA("Ephemeral runtime registration; this is not a persistent package installation.") : pendingStep("Managed package has not been installed."),
-      execution_registered: input.strategy === "remote" ? nA("Remote endpoint; no local execution command applies.") : input.strategy === "managed" ? nA("The managed package is configured directly from its installation directory.") : pendingStep("Execution command has not been verified."),
+      installed:
+        input.strategy === "remote"
+          ? nA("Remote server; no local package installation applies.")
+          : input.strategy === "ephemeral"
+            ? nA(
+                "Ephemeral runtime registration; this is not a persistent package installation.",
+              )
+            : pendingStep("Managed package has not been installed."),
+      execution_registered:
+        input.strategy === "remote"
+          ? nA("Remote endpoint; no local execution command applies.")
+          : input.strategy === "managed"
+            ? nA(
+                "The managed package is configured directly from its installation directory.",
+              )
+            : pendingStep("Execution command has not been verified."),
       configured: pendingStep("Client configuration has not been changed."),
-      setup_required: pendingStep("Authentication and setup requirements have not been identified."),
-      authenticated: pendingStep("Authentication requirements are unknown or not checked."),
+      setup_required: pendingStep(
+        "Authentication and setup requirements have not been identified.",
+      ),
+      authenticated: pendingStep(
+        "Authentication requirements are unknown or not checked.",
+      ),
       startup_verified: pendingStep("Server startup has not been checked."),
-      connection_verified: pendingStep("MCP protocol connection has not been checked."),
-      client_connection_verified: pendingStep("The selected AI client has not been independently observed loading this server."),
+      connection_verified: pendingStep(
+        "MCP protocol connection has not been checked.",
+      ),
+      client_connection_verified: pendingStep(
+        "The selected AI client has not been independently observed loading this server.",
+      ),
     },
   };
 }

@@ -30,7 +30,11 @@ export interface CapabilityClaim {
   basis: "inferred" | "registry-declared" | "verified";
 }
 
-export type SecurityRisk = "Informational" | "Sensitive credential requirement" | "Elevated concern" | "Unknown";
+export type SecurityRisk =
+  | "Informational"
+  | "Sensitive credential requirement"
+  | "Elevated concern"
+  | "Unknown";
 
 export interface DuplicateRelationship {
   groupId: string;
@@ -62,9 +66,10 @@ export interface CandidateEvaluation {
 export interface RecommendationReport {
   service: ServiceIdentity;
   candidateCount: number;
-  recommendedCandidateId?: string;
+  topCandidateId?: string;
   recommendationMessage: string;
-  recommendationStatus: "confident" | "qualified" | "similar candidates" | "none";
+  recommendationStatus:
+    "recommended" | "candidate" | "similar_candidates" | "no_recommendation";
   recommendationReasons: string[];
   alternativeCandidateIds: string[];
   evaluations: CandidateEvaluation[];

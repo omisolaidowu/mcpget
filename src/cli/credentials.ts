@@ -11,7 +11,11 @@ export class CredentialPromptCancelled extends Error {
 
 export interface CredentialPrompt {
   keepExisting(name: string): Promise<boolean>;
-  readValue(name: string, secret: boolean, description?: string): Promise<string | undefined>;
+  readValue(
+    name: string,
+    secret: boolean,
+    description?: string,
+  ): Promise<string | undefined>;
 }
 
 export interface CredentialCollection {
@@ -21,22 +25,123 @@ export interface CredentialCollection {
   unsupported: string[];
 }
 
-export function formatCredentialPrompt(name: string, description?: string): string {
-  const segments = (description ?? "").split("|").map((segment) => segment.trim())
-    .filter((segment) => segment && segment.toLowerCase() !== name.toLowerCase() && !/^(?:—|-|required|optional)$/i.test(segment));
-  const descriptor = segments.find((segment) => /api[\s_-]*key|token|password|credential|secret/i.test(segment));
-  const rawFormatHint = descriptor?.match(/\(([^()]*(?:\.\.\.|…|<[^>]+>)[^()]*)\)/)?.[1] ??
+export type CredentialKind = "secret" | "directory_path" | "configuration";
+
+export interface InheritedCredentialResult {
+  values: Record<string, string>;
+  suppliedNames: string[];
+  missingNames: string[];
+  conflictNames: string[];
+  kinds: Record<string, CredentialKind>;
+}
+
+export function classifyCredentialKind(
+  input: RegistryInputRequirement,
+): CredentialKind {
+  const text = `${input.name} ${input.description ?? ""}`;
+  if (
+    /(?:^|_)(?:DIR|DIRECTORY|FOLDER|PATH)(?:_|$)/i.test(input.name) ||
+    /\b(?:directory|folder|path)\b/i.test(input.description ?? "")
+  ) {
+    return "directory_path";
+  }
+  if (
+    input.secret === true ||
+    /(?:token|secret|password|credential|api[_ -]?key)/i.test(text)
+  ) {
+    return "secret";
+  }
+  return "configuration";
+}
+
+export function collectInheritedRequiredCredentials(
+  inputs: RegistryInputRequirement[],
+  inheritedEnvironment: NodeJS.ProcessEnv,
+  existingEnvironment: Record<string, string>,
+): InheritedCredentialResult {
+  const values: Record<string, string> = {};
+  const suppliedNames: string[] = [];
+  const missingNames: string[] = [];
+  const conflictNames: string[] = [];
+  const kinds: Record<string, CredentialKind> = {};
+  const seen = new Set<string>();
+
+  for (const input of inputs) {
+    if (input.required !== true || seen.has(input.name)) continue;
+    seen.add(input.name);
+    kinds[input.name] = classifyCredentialKind(input);
+    const inherited = inheritedEnvironment[input.name];
+    if (typeof inherited !== "string" || inherited.length === 0) {
+      if (
+        !Object.prototype.hasOwnProperty.call(existingEnvironment, input.name)
+      )
+        missingNames.push(input.name);
+      continue;
+    }
+    values[input.name] = inherited;
+    suppliedNames.push(input.name);
+    if (
+      Object.prototype.hasOwnProperty.call(existingEnvironment, input.name) &&
+      existingEnvironment[input.name] !== inherited
+    ) {
+      conflictNames.push(input.name);
+    }
+  }
+  return { values, suppliedNames, missingNames, conflictNames, kinds };
+}
+
+export const nonInteractiveCredentialPrompt: CredentialPrompt = {
+  async keepExisting() {
+    return true;
+  },
+  async readValue(name) {
+    throw new Error(
+      `Missing required credential: ${name}. It could not be collected in a non-interactive environment.`,
+    );
+  },
+};
+
+export function formatCredentialPrompt(
+  name: string,
+  description?: string,
+): string {
+  const segments = (description ?? "")
+    .split("|")
+    .map((segment) => segment.trim())
+    .filter(
+      (segment) =>
+        segment &&
+        segment.toLowerCase() !== name.toLowerCase() &&
+        !/^(?:—|-|required|optional)$/i.test(segment),
+    );
+  const descriptor = segments.find((segment) =>
+    /api[\s_-]*key|token|password|credential|secret/i.test(segment),
+  );
+  const rawFormatHint =
+    descriptor?.match(/\(([^()]*(?:\.\.\.|…|<[^>]+>)[^()]*)\)/)?.[1] ??
     description?.match(/(?:expected\s+)?format\s*:\s*([^|;]+)/i)?.[1];
-  const formatHint = rawFormatHint ? cleanCredentialDescription(rawFormatHint).replace(/^format\s*:?\s*/i, "").slice(0, 120) : undefined;
-  const envPrefix = name.replace(/_(?:API_)?(?:KEY|TOKEN|PASSWORD|SECRET|CREDENTIAL)$/i, "").replace(/_/g, " ");
+  const formatHint = rawFormatHint
+    ? cleanCredentialDescription(rawFormatHint)
+        .replace(/^format\s*:?\s*/i, "")
+        .slice(0, 120)
+    : undefined;
+  const envPrefix = name
+    .replace(/_(?:API_)?(?:KEY|TOKEN|PASSWORD|SECRET|CREDENTIAL)$/i, "")
+    .replace(/_/g, " ");
   const humanPrefix = titleCaseEnvName(envPrefix);
-  const baseLabel = descriptor ? cleanCredentialLabel(descriptor, name) : undefined;
+  const baseLabel = descriptor
+    ? cleanCredentialLabel(descriptor, name)
+    : undefined;
   const label = baseLabel
-    ? new RegExp(`\\b${escapeRegex(humanPrefix)}\\b`, "i").test(baseLabel) || !humanPrefix
+    ? new RegExp(`\\b${escapeRegex(humanPrefix)}\\b`, "i").test(baseLabel) ||
+      !humanPrefix
       ? baseLabel
       : `${humanPrefix} ${baseLabel}`
     : titleCaseEnvName(name);
-  const inputLabel = label.match(/\b(?:API\s+key|access token|token|password|credential|secret)\b/i)?.[0] ?? label;
+  const inputLabel =
+    label.match(
+      /\b(?:API\s+key|access token|token|password|credential|secret)\b/i,
+    )?.[0] ?? label;
   return [
     "Authentication required",
     "",
@@ -54,7 +159,12 @@ export async function collectRequiredCredentials(
   supportsEnvironment: boolean,
   prompt: CredentialPrompt = terminalCredentialPrompt,
 ): Promise<CredentialCollection> {
-  const result: CredentialCollection = { values: {}, skipped: [], oauth: [], unsupported: [] };
+  const result: CredentialCollection = {
+    values: {},
+    skipped: [],
+    oauth: [],
+    unsupported: [],
+  };
   const seen = new Set<string>();
   for (const input of inputs) {
     if (input.required !== true || seen.has(input.name)) continue;
@@ -63,40 +173,76 @@ export async function collectRequiredCredentials(
       result.oauth.push(input.name);
       continue;
     }
-    if (input.name.length > 128 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(input.name)) {
-      throw new Error("A required environment variable name from server metadata is invalid.");
+    if (
+      input.name.length > 128 ||
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(input.name)
+    ) {
+      throw new Error(
+        "A required environment variable name from server metadata is invalid.",
+      );
     }
     if (!supportsEnvironment) {
       result.unsupported.push(input.name);
       continue;
     }
-    const secret = input.secret === true || /(?:token|secret|password|credential|api[_ -]?key)/i.test(input.name);
-    if (Object.prototype.hasOwnProperty.call(existing, input.name) && await prompt.keepExisting(input.name)) {
+    const kind = classifyCredentialKind(input);
+    const secret = kind === "secret";
+    if (
+      Object.prototype.hasOwnProperty.call(existing, input.name) &&
+      (await prompt.keepExisting(input.name))
+    ) {
       result.values[input.name] = existing[input.name]!;
       continue;
     }
     const value = await prompt.readValue(input.name, secret, input.description);
-    if (value === undefined || value.length === 0) result.skipped.push(input.name);
+    if (value === undefined || value.length === 0)
+      result.skipped.push(input.name);
     else result.values[input.name] = value;
   }
   return result;
 }
 
+export function createTerminalCredentialPrompt(
+  output: Writable = process.stdout,
+): CredentialPrompt {
+  return {
+    async keepExisting(name) {
+      const answer = await terminalQuestion(
+        `A value for ${name} is already configured. Keep it? [Y/n] `,
+        output,
+      );
+      return !/^n(o)?$/i.test(answer.trim());
+    },
+    async readValue(name, secret, description) {
+      const prompt = cleanPromptText(formatCredentialPrompt(name, description));
+      if (secret) return readHiddenInput(process.stdin, output, prompt);
+      const value = await terminalQuestion(prompt, output);
+      return value.length ? value : undefined;
+    },
+  };
+}
+
 const terminalCredentialPrompt: CredentialPrompt = {
   async keepExisting(name) {
-    const answer = await terminalQuestion(`A value for ${name} is already configured. Keep it? [Y/n] `);
+    const answer = await terminalQuestion(
+      `A value for ${name} is already configured. Keep it? [Y/n] `,
+      process.stdout,
+    );
     return !/^n(o)?$/i.test(answer.trim());
   },
   async readValue(name, secret, description) {
     const prompt = cleanPromptText(formatCredentialPrompt(name, description));
     if (secret) return readHiddenValue(prompt);
-    const value = await terminalQuestion(prompt);
+    const value = await terminalQuestion(prompt, process.stdout);
     return value.length ? value : undefined;
   },
 };
 
-function terminalQuestion(prompt: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+function terminalQuestion(
+  prompt: string,
+  output: Writable = process.stdout,
+): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output });
   return new Promise((resolve, reject) => {
     const onSigint = (): void => {
       rl.close();
@@ -104,11 +250,13 @@ function terminalQuestion(prompt: string): Promise<string> {
       reject(new CredentialPromptCancelled());
     };
     rl.once("SIGINT", onSigint);
-    rl.question(prompt).then(resolve, reject).finally(() => {
-      rl.removeListener("SIGINT", onSigint);
-      rl.close();
-      process.stdin.pause();
-    });
+    rl.question(prompt)
+      .then(resolve, reject)
+      .finally(() => {
+        rl.removeListener("SIGINT", onSigint);
+        rl.close();
+        process.stdin.pause();
+      });
   });
 }
 
@@ -126,9 +274,15 @@ function readHiddenValue(prompt: string): Promise<string | undefined> {
   return readHiddenInput(process.stdin, process.stdout, prompt);
 }
 
-export function readHiddenInput(input: HiddenPromptInput, output: HiddenPromptOutput, prompt: string): Promise<string | undefined> {
+export function readHiddenInput(
+  input: HiddenPromptInput,
+  output: HiddenPromptOutput,
+  prompt: string,
+): Promise<string | undefined> {
   if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== "function") {
-    throw new Error("Hidden credential entry requires an interactive terminal; no credential was read.");
+    throw new Error(
+      "Hidden credential entry requires an interactive terminal; no credential was read.",
+    );
   }
   return new Promise((resolve, reject) => {
     const wasRaw = input.isRaw ?? false;
@@ -154,7 +308,8 @@ export function readHiddenInput(input: HiddenPromptInput, output: HiddenPromptOu
           resolve(value.length ? value : undefined);
           return;
         }
-        if (character === "\u0008" || character === "\u007f") value = value.slice(0, -1);
+        if (character === "\u0008" || character === "\u007f")
+          value = value.slice(0, -1);
         else if (character >= " ") value += character;
       }
     };
@@ -166,24 +321,49 @@ export function readHiddenInput(input: HiddenPromptInput, output: HiddenPromptOu
       input.on("data", onData);
     } catch (error) {
       cleanup();
-      reject(new Error("Could not read credential input from the terminal.", { cause: error }));
+      reject(
+        new Error("Could not read credential input from the terminal.", {
+          cause: error,
+        }),
+      );
     }
   });
 }
 
 function cleanPromptText(value: string): string {
-  return [...value].map((character) => {
-    const code = character.charCodeAt(0);
-    return code < 32 || code === 127 ? character === "\n" ? "\n" : " " : character;
-  }).join("").slice(0, 500);
+  return [...value]
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127
+        ? character === "\n"
+          ? "\n"
+          : " "
+        : character;
+    })
+    .join("")
+    .slice(0, 500);
 }
 
-function cleanCredentialLabel(description: string, name: string): string | undefined {
-  const label = cleanCredentialDescription(description.replace(/\([^()]*\)/g, "").replace(new RegExp(escapeRegex(name), "ig"), " "))
-    .replace(/\b(?:required|optional|must provide|must set|environment variable|is required|is needed)\b/ig, " ")
+function cleanCredentialLabel(
+  description: string,
+  name: string,
+): string | undefined {
+  const label = cleanCredentialDescription(
+    description
+      .replace(/\([^()]*\)/g, "")
+      .replace(new RegExp(escapeRegex(name), "ig"), " "),
+  )
+    .replace(
+      /\b(?:required|optional|must provide|must set|environment variable|is required|is needed)\b/gi,
+      " ",
+    )
     .replace(/^[|:—\-\s]+|[|:—\-\s]+$/g, "")
-    .replace(/\s+/g, " ").trim().slice(0, 120);
-  return /api\s*key|token|password|credential|secret/i.test(label) ? label : undefined;
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return /api\s*key|token|password|credential|secret/i.test(label)
+    ? label
+    : undefined;
 }
 
 function cleanCredentialDescription(value: string): string {
@@ -197,16 +377,23 @@ function cleanCredentialDescription(value: string): string {
     .replace(/_(.*?)_/g, "$1")
     .replace(/~~(.*?)~~/g, "$1")
     .replace(/[|]/g, " ")
-    .replace(/\s+/g, " ").trim();
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function titleCaseEnvName(value: string): string {
-  return value.split(/[\s_]+/).filter(Boolean).map((part) => {
-    const upper = part.toUpperCase();
-    if (["API", "ID", "URL", "URI", "OAUTH", "HTTP"].includes(upper)) return upper;
-    if (["KEY", "TOKEN", "PASSWORD", "SECRET", "CREDENTIAL"].includes(upper)) return part.toLowerCase();
-    return `${part[0]!.toUpperCase()}${part.slice(1).toLowerCase()}`;
-  }).join(" ");
+  return value
+    .split(/[\s_]+/)
+    .filter(Boolean)
+    .map((part) => {
+      const upper = part.toUpperCase();
+      if (["API", "ID", "URL", "URI", "OAUTH", "HTTP"].includes(upper))
+        return upper;
+      if (["KEY", "TOKEN", "PASSWORD", "SECRET", "CREDENTIAL"].includes(upper))
+        return part.toLowerCase();
+      return `${part[0]!.toUpperCase()}${part.slice(1).toLowerCase()}`;
+    })
+    .join(" ");
 }
 
 function escapeRegex(value: string): string {

@@ -1,6 +1,6 @@
 {
   "name": "@idowupaul/mcpget",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "MCP server installer CLI for Claude, Codex, and Cursor.",
   "license": "MIT",
   "type": "module",
@@ -36,6 +36,7 @@
     "dev": "tsx src/cli/index.ts",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "test:acceptance": "npm run build && vitest run --config tests/acceptance/vitest.acceptance.config.ts",
     "test:watch": "vitest",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -46,7 +47,8 @@
     "@modelcontextprotocol/client": "^2.4.0",
     "commander": "^14.0.0",
     "smol-toml": "^1.9.1",
-    "tldts": "^7.5.5"
+    "tldts": "^7.5.5",
+    "undici": "^6.29.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

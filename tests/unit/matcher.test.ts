@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ServerCandidate } from "../../src/models/server-candidate.js";
-import { evaluateCandidate, evaluateCandidates } from "../../src/discovery/evaluate-candidates.js";
+import {
+  evaluateCandidate,
+  evaluateCandidates,
+} from "../../src/discovery/evaluate-candidates.js";
 import { resolveServiceIdentity } from "../../src/discovery/url-resolver.js";
 
 const notion = resolveServiceIdentity("notion.com");
@@ -35,15 +38,20 @@ describe("candidate evaluation", () => {
       notion,
       candidate("io.github.writer/notion", {
         title: "Notion MCP",
-        description: "Search, read, create, and update Notion pages and databases.",
+        description:
+          "Search, read, create, and update Notion pages and databases.",
         repositoryUrl: "https://github.com/writer/notion-mcp",
       }),
     );
     expect(result.relevance).toBe("Direct integration");
     expect(result.confidence).toBe("Medium");
-    expect(result.capabilities.map((item) => item.name)).toContain("Database queries");
+    expect(result.capabilities.map((item) => item.name)).toContain(
+      "Database queries",
+    );
     expect(result.trust).toBe("Unverified");
-    expect(result.evidence.some((item) => item.dimension === "relevance")).toBe(true);
+    expect(result.evidence.some((item) => item.dimension === "relevance")).toBe(
+      true,
+    );
   });
 
   it("keeps relevance and confidence consistent across product aliases and known domains", () => {
@@ -61,19 +69,28 @@ describe("candidate evaluation", () => {
         setupComplexity: "Unknown",
       },
     });
-    const fromAlias = evaluateCandidate(resolveServiceIdentity("notion"), record);
-    const fromCom = evaluateCandidate(resolveServiceIdentity("https://notion.com"), record);
-    const fromSo = evaluateCandidate(resolveServiceIdentity("https://www.notion.so/workspace"), record);
+    const fromAlias = evaluateCandidate(
+      resolveServiceIdentity("notion"),
+      record,
+    );
+    const fromCom = evaluateCandidate(
+      resolveServiceIdentity("https://notion.com"),
+      record,
+    );
+    const fromSo = evaluateCandidate(
+      resolveServiceIdentity("https://www.notion.so/workspace"),
+      record,
+    );
     expect([fromAlias.relevance, fromCom.relevance, fromSo.relevance]).toEqual([
       "Direct integration",
       "Direct integration",
       "Direct integration",
     ]);
-    expect([fromAlias.confidence, fromCom.confidence, fromSo.confidence]).toEqual([
-      "High",
-      "High",
-      "High",
-    ]);
+    expect([
+      fromAlias.confidence,
+      fromCom.confidence,
+      fromSo.confidence,
+    ]).toEqual(["High", "High", "High"]);
   });
 
   it("classifies Notion URL Shape as specialized rather than general-purpose", () => {
@@ -104,7 +121,8 @@ describe("candidate evaluation", () => {
       linear,
       candidate("io.github.author/linear-programming-mcp", {
         title: "Linear Programming MCP",
-        description: "Read, check, lint, scaffold and run linear programming code.",
+        description:
+          "Read, check, lint, scaffold and run linear programming code.",
       }),
     );
     const namespaceOnly = evaluateCandidate(
@@ -125,7 +143,8 @@ describe("candidate evaluation", () => {
       linear,
       candidate("someone/notion-math", {
         title: "Linear Programming",
-        description: "Mathematical linear algebra and equation solver for linear.app data.",
+        description:
+          "Mathematical linear algebra and equation solver for linear.app data.",
         websiteUrl: "https://linear.app/tools/math",
       }),
     );
@@ -143,7 +162,9 @@ describe("candidate evaluation", () => {
       }),
     );
     expect(result.relevance).toBe("Unrelated / false positive");
-    expect(result.evidence.some((item) => item.type === "product-domain-reference")).toBe(false);
+    expect(
+      result.evidence.some((item) => item.type === "product-domain-reference"),
+    ).toBe(false);
   });
 
   it("uses unknown trust states instead of inferring a community or vendor publisher", () => {
@@ -164,10 +185,14 @@ describe("candidate evaluation", () => {
     expect(noPublisher.trust).toBe("Insufficient evidence");
     expect(withRepo.trust).toBe("Unverified");
     expect(withRepo.trust).not.toBe("Community maintained");
-    expect(noPublisher.evidence.some((item) => item.type === "publisher-officialness-claim")).toBe(true);
+    expect(
+      noPublisher.evidence.some(
+        (item) => item.type === "publisher-officialness-claim",
+      ),
+    ).toBe(true);
   });
 
-  it("recommends the broadest direct candidate without letting trust decide", () => {
+  it("ranks the broadest direct candidate without overstating endorsement", () => {
     const report = evaluateCandidates(notion, [
       candidate("a/weak", {
         title: "Notion upload",
@@ -176,13 +201,56 @@ describe("candidate evaluation", () => {
       }),
       candidate("z/broad", {
         title: "Notion workspace integration",
-        description: "Search, read, create and update Notion pages, databases and workspaces.",
+        description:
+          "Search, read, create and update Notion pages, databases and workspaces.",
         repositoryUrl: "https://github.com/z/broad",
       }),
     ]);
-    expect(report.recommendedCandidateId).toBe("z/broad");
-    expect(report.evaluations.find((item) => item.candidate.name === "a/weak")?.relevance).toBe(
-      "Specialized integration",
+    expect(report.topCandidateId).toBe("z/broad");
+    expect(report.recommendationStatus).toBe("candidate");
+    expect(
+      report.evaluations.find((item) => item.candidate.name === "a/weak")
+        ?.relevance,
+    ).toBe("Specialized integration");
+    expect(
+      report.evaluations.find((item) => item.candidate.name === "z/broad")
+        ?.trust,
+    ).toBe("Unverified");
+  });
+
+  it("uses recommended only at the existing strong-confidence threshold without claiming verification", () => {
+    const report = evaluateCandidates(notion, [
+      candidate("community/notion-mcp", {
+        title: "Notion MCP",
+        description:
+          "Search, read, create, update, and delete Notion pages, databases, workspaces, and files.",
+        repositoryUrl: "https://github.com/community/notion-mcp",
+        websiteUrl: "https://notion.com/mcp",
+        version: "1.0.0",
+        registryStatus: "active",
+        updatedAt: "2026-01-01T00:00:00Z",
+        operational: {
+          deploymentModels: ["Remote endpoint"],
+          transports: ["streamable-http"],
+          packages: [],
+          remoteEndpoints: ["https://mcp.notion.com/mcp"],
+          configurationInputs: [],
+          authentication: "Unknown",
+          clientCompatibility: "Unknown",
+          setupComplexity: "Unknown",
+        },
+      }),
+    ]);
+
+    expect(report.recommendationStatus).toBe("recommended");
+    expect(report.evaluations[0]?.trust).toBe("Unverified");
+    expect(
+      report.evaluations[0]?.capabilities.every(
+        (claim) => claim.basis === "inferred",
+      ),
+    ).toBe(true);
+    expect(report.recommendationMessage).toContain(
+      "not independently verified",
     );
   });
 
@@ -193,8 +261,9 @@ describe("candidate evaluation", () => {
         description: "Check a Notion URL shape.",
       }),
     ]);
-    expect(report.recommendedCandidateId).toBeUndefined();
-    expect(report.recommendationMessage).toContain("No confident recommendation");
+    expect(report.topCandidateId).toBeUndefined();
+    expect(report.recommendationStatus).toBe("no_recommendation");
+    expect(report.recommendationMessage).toContain("No recommendation");
   });
 
   it("does not declare a winner when equally supported candidates tie", () => {
@@ -207,15 +276,19 @@ describe("candidate evaluation", () => {
     };
     const report = evaluateCandidates(notion, [
       candidate("a/notion", fields),
-      candidate("b/notion", { ...fields, repositoryUrl: "https://github.com/other/project" }),
+      candidate("b/notion", {
+        ...fields,
+        repositoryUrl: "https://github.com/other/project",
+      }),
     ]);
-    expect(report.recommendationStatus).toBe("similar candidates");
-    expect(report.recommendedCandidateId).toBeUndefined();
+    expect(report.recommendationStatus).toBe("similar_candidates");
+    expect(report.topCandidateId).toBeUndefined();
     expect(report.alternativeCandidateIds).toHaveLength(2);
   });
 
   it("compares deployment choices with evidence and surfaces a materially different hosted option", () => {
-    const operations = "Search, read, create and update Notion pages, databases and workspaces.";
+    const operations =
+      "Search, read, create and update Notion pages, databases and workspaces.";
     const local = candidate("community/notion-local", {
       title: "Notion Workspace Tools",
       description: operations,
@@ -223,9 +296,21 @@ describe("candidate evaluation", () => {
       version: "1.2.0",
       registryStatus: "active",
       operational: {
-        deploymentModels: ["Local package"], transports: ["stdio"],
-        packages: [{ registryType: "npm", identifier: "notion-local", version: "1.2.0", runtimeHint: "npx" }],
-        remoteEndpoints: [], configurationInputs: [], authentication: "Unknown", clientCompatibility: "Unknown", setupComplexity: "Unknown",
+        deploymentModels: ["Local package"],
+        transports: ["stdio"],
+        packages: [
+          {
+            registryType: "npm",
+            identifier: "notion-local",
+            version: "1.2.0",
+            runtimeHint: "npx",
+          },
+        ],
+        remoteEndpoints: [],
+        configurationInputs: [],
+        authentication: "Unknown",
+        clientCompatibility: "Unknown",
+        setupComplexity: "Unknown",
       },
     });
     const hosted = candidate("service/mcp", {
@@ -234,93 +319,207 @@ describe("candidate evaluation", () => {
       version: "1.0.0",
       registryStatus: "active",
       operational: {
-        deploymentModels: ["Remote endpoint"], transports: ["streamable-http"], packages: [],
-        remoteEndpoints: ["https://mcp.notion.com/mcp"], configurationInputs: [],
-        authentication: "Unknown", clientCompatibility: "Unknown", setupComplexity: "Unknown",
+        deploymentModels: ["Remote endpoint"],
+        transports: ["streamable-http"],
+        packages: [],
+        remoteEndpoints: ["https://mcp.notion.com/mcp"],
+        configurationInputs: [],
+        authentication: "Unknown",
+        clientCompatibility: "Unknown",
+        setupComplexity: "Unknown",
       },
     });
     const report = evaluateCandidates(notion, [local, hosted]);
-    expect(report.recommendedCandidateId).toBe(local.registryIdentifier);
+    expect(report.topCandidateId).toBe(local.registryIdentifier);
     expect(report.alternativeCandidateIds).toContain(hosted.registryIdentifier);
-    expect(report.evaluations.find((item) => item.candidate.registryIdentifier === hosted.registryIdentifier)?.hostingAssessment)
-      .toContain("known service domain");
-    expect(report.evaluations.find((item) => item.candidate.registryIdentifier === hosted.registryIdentifier)?.trust)
-      .not.toBe("Vendor verified");
+    expect(
+      report.evaluations.find(
+        (item) =>
+          item.candidate.registryIdentifier === hosted.registryIdentifier,
+      )?.hostingAssessment,
+    ).toContain("known service domain");
+    expect(
+      report.evaluations.find(
+        (item) =>
+          item.candidate.registryIdentifier === hosted.registryIdentifier,
+      )?.trust,
+    ).not.toBe("Vendor verified");
   });
 
   it("allows a well-supported local package to outrank a less documented third-party endpoint", () => {
-    const description = "Search, read, create and update Notion pages, databases and workspaces.";
+    const description =
+      "Search, read, create and update Notion pages, databases and workspaces.";
     const makeOperational = (remote: boolean) => ({
-      deploymentModels: [remote ? "Remote endpoint" as const : "Local package" as const],
+      deploymentModels: [
+        remote ? ("Remote endpoint" as const) : ("Local package" as const),
+      ],
       transports: [remote ? "streamable-http" : "stdio"],
-      packages: remote ? [] : [{ registryType: "npm", identifier: "notion-tool", version: "1.0.0", runtimeHint: "npx" }],
+      packages: remote
+        ? []
+        : [
+            {
+              registryType: "npm",
+              identifier: "notion-tool",
+              version: "1.0.0",
+              runtimeHint: "npx",
+            },
+          ],
       remoteEndpoints: remote ? ["https://host.example/mcp"] : [],
-      configurationInputs: [], authentication: "Unknown" as const,
-      clientCompatibility: "Unknown" as const, setupComplexity: "Unknown" as const,
+      configurationInputs: [],
+      authentication: "Unknown" as const,
+      clientCompatibility: "Unknown" as const,
+      setupComplexity: "Unknown" as const,
     });
     const report = evaluateCandidates(notion, [
-      candidate("a/remote-notion", { title: "Notion workspace", description, operational: makeOperational(true) }),
-      candidate("z/local-notion", { title: "Notion workspace", description, repositoryUrl: "https://github.com/z/local", version: "1.0.0", registryStatus: "active", operational: makeOperational(false) }),
+      candidate("a/remote-notion", {
+        title: "Notion workspace",
+        description,
+        operational: makeOperational(true),
+      }),
+      candidate("z/local-notion", {
+        title: "Notion workspace",
+        description,
+        repositoryUrl: "https://github.com/z/local",
+        version: "1.0.0",
+        registryStatus: "active",
+        operational: makeOperational(false),
+      }),
     ]);
-    expect(report.recommendedCandidateId).toBe("z/local-notion");
+    expect(report.topCandidateId).toBe("z/local-notion");
   });
 
   it("sorts tied evaluations deterministically by Registry identifier", () => {
     const report = evaluateCandidates(notion, [
-      candidate("z/notion", { title: "Notion MCP", description: "Notion connector." }),
-      candidate("a/notion", { title: "Notion MCP", description: "Notion connector." }),
+      candidate("z/notion", {
+        title: "Notion MCP",
+        description: "Notion connector.",
+      }),
+      candidate("a/notion", {
+        title: "Notion MCP",
+        description: "Notion connector.",
+      }),
     ]);
-    expect(report.evaluations.map((item) => item.candidate.registryIdentifier)).toEqual([
-      "a/notion",
-      "z/notion",
-    ]);
+    expect(
+      report.evaluations.map((item) => item.candidate.registryIdentifier),
+    ).toEqual(["a/notion", "z/notion"]);
   });
 
   it("groups likely duplicate project entries but does not merge shared organization or similar names", () => {
     const repository = "https://github.com/acme/notion-mcp.git";
     const pack = (version: string) => ({
-      deploymentModels: ["Local package" as const], transports: ["stdio"],
-      packages: [{ registryType: "npm", identifier: "@acme/notion-mcp", version }],
-      remoteEndpoints: [], configurationInputs: [], authentication: "Unknown" as const,
-      clientCompatibility: "Unknown" as const, setupComplexity: "Unknown" as const,
+      deploymentModels: ["Local package" as const],
+      transports: ["stdio"],
+      packages: [
+        { registryType: "npm", identifier: "@acme/notion-mcp", version },
+      ],
+      remoteEndpoints: [],
+      configurationInputs: [],
+      authentication: "Unknown" as const,
+      clientCompatibility: "Unknown" as const,
+      setupComplexity: "Unknown" as const,
     });
     const report = evaluateCandidates(notion, [
-      candidate("registry-a/notion-mcp", { title: "Notion MCP", description: "Search, read and update Notion pages and databases.", repositoryUrl: "https://github.com/acme/notion-mcp", version: "2.45.1", operational: pack("2.45.1") }),
-      candidate("registry-b/notion-mcp", { title: "Notion MCP", description: "Search, read and update Notion pages and databases.", repositoryUrl: repository, version: "2.42.0", operational: pack("2.42.0") }),
-      candidate("registry-c/notion-mcp", { title: "Notion MCP", description: "Search and read Notion pages.", repositoryUrl: "https://github.com/acme/another-project", operational: { ...pack("2.45.1"), packages: [{ registryType: "npm", identifier: "@acme/other-notion-mcp", version: "2.45.1" }] } }),
+      candidate("registry-a/notion-mcp", {
+        title: "Notion MCP",
+        description: "Search, read and update Notion pages and databases.",
+        repositoryUrl: "https://github.com/acme/notion-mcp",
+        version: "2.45.1",
+        operational: pack("2.45.1"),
+      }),
+      candidate("registry-b/notion-mcp", {
+        title: "Notion MCP",
+        description: "Search, read and update Notion pages and databases.",
+        repositoryUrl: repository,
+        version: "2.42.0",
+        operational: pack("2.42.0"),
+      }),
+      candidate("registry-c/notion-mcp", {
+        title: "Notion MCP",
+        description: "Search and read Notion pages.",
+        repositoryUrl: "https://github.com/acme/another-project",
+        operational: {
+          ...pack("2.45.1"),
+          packages: [
+            {
+              registryType: "npm",
+              identifier: "@acme/other-notion-mcp",
+              version: "2.45.1",
+            },
+          ],
+        },
+      }),
     ]);
-    const grouped = report.evaluations.find((item) => item.candidate.registryIdentifier === "registry-a/notion-mcp");
+    const grouped = report.evaluations.find(
+      (item) => item.candidate.registryIdentifier === "registry-a/notion-mcp",
+    );
     expect(grouped?.duplicate?.confidence).toBe("Likely same project");
-    expect(grouped?.duplicate?.relatedIdentifiers).toContain("registry-b/notion-mcp");
-    expect(grouped?.duplicate?.versionNote).toContain("2.45.1 appears newer than 2.42.0");
-    expect(report.evaluations.find((item) => item.candidate.registryIdentifier === "registry-c/notion-mcp")?.duplicate).toBeUndefined();
+    expect(grouped?.duplicate?.relatedIdentifiers).toContain(
+      "registry-b/notion-mcp",
+    );
+    expect(grouped?.duplicate?.versionNote).toContain(
+      "2.45.1 appears newer than 2.42.0",
+    );
+    expect(
+      report.evaluations.find(
+        (item) => item.candidate.registryIdentifier === "registry-c/notion-mcp",
+      )?.duplicate,
+    ).toBeUndefined();
   });
 
   it("surfaces browser-session and filesystem requirements as elevated concerns without exposing values", () => {
-    const result = evaluateCandidate(notion, candidate("author/notion", {
-      title: "Notion workspace integration",
-      description: "Search, read and update Notion pages and databases.",
-      operational: {
-        deploymentModels: ["Local package"], transports: ["stdio"], packages: [], remoteEndpoints: [],
-        configurationInputs: [
-          { name: "NOTION_TOKEN", secret: true, description: "Browser token_v2 session cookie", deployment: "local-package" },
-          { name: "NOTION_ALLOWED_DIR", description: "Local filesystem folder path", deployment: "local-package" },
-        ],
-        authentication: "Unknown", clientCompatibility: "Unknown", setupComplexity: "Unknown",
-      },
-    }));
+    const result = evaluateCandidate(
+      notion,
+      candidate("author/notion", {
+        title: "Notion workspace integration",
+        description: "Search, read and update Notion pages and databases.",
+        operational: {
+          deploymentModels: ["Local package"],
+          transports: ["stdio"],
+          packages: [],
+          remoteEndpoints: [],
+          configurationInputs: [
+            {
+              name: "NOTION_TOKEN",
+              secret: true,
+              description: "Browser token_v2 session cookie",
+              deployment: "local-package",
+            },
+            {
+              name: "NOTION_ALLOWED_DIR",
+              description: "Local filesystem folder path",
+              deployment: "local-package",
+            },
+          ],
+          authentication: "Unknown",
+          clientCompatibility: "Unknown",
+          setupComplexity: "Unknown",
+        },
+      }),
+    );
     expect(result.securityRisk).toBe("Elevated concern");
-    expect(result.securityFindings.join(" ")).toContain("browser-session credential");
-    expect(result.securityFindings.join(" ")).toContain("local resource access");
+    expect(result.securityFindings.join(" ")).toContain(
+      "browser-session credential",
+    );
+    expect(result.securityFindings.join(" ")).toContain(
+      "local resource access",
+    );
     expect(JSON.stringify(result)).not.toContain("secret-value");
   });
 
   it("does not inflate functional coverage from repeated verbose descriptions", () => {
     const short = "Search and read Notion pages and databases.";
     const verbose = `${short} ${"Search, read, pages, databases. ".repeat(30)}`;
-    const a = evaluateCandidate(notion, candidate("author/notion-a", { title: "Notion", description: short }));
-    const b = evaluateCandidate(notion, candidate("author/notion-b", { title: "Notion", description: verbose }));
-    expect(b.capabilities.map((item) => item.name)).toEqual(a.capabilities.map((item) => item.name));
+    const a = evaluateCandidate(
+      notion,
+      candidate("author/notion-a", { title: "Notion", description: short }),
+    );
+    const b = evaluateCandidate(
+      notion,
+      candidate("author/notion-b", { title: "Notion", description: verbose }),
+    );
+    expect(b.capabilities.map((item) => item.name)).toEqual(
+      a.capabilities.map((item) => item.name),
+    );
     expect(b.capabilities.length).toBe(a.capabilities.length);
     expect(b.evidenceQuality).toBe(a.evidenceQuality);
   });
