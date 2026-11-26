@@ -39,6 +39,7 @@ async function environment() {
       ...process.env,
       HOME: home,
       USERPROFILE: home,
+      XDG_CONFIG_HOME: join(home, ".config"),
       APPDATA: join(home, "AppData", "Roaming"),
       LOCALAPPDATA: join(home, "AppData", "Local"),
       CODEX_HOME: codexHome,

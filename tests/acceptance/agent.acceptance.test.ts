@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const root = join(process.cwd());
 const cli = join(root, "dist", "cli", "index.js");
@@ -38,6 +38,7 @@ async function isolatedEnvironment(mode = "primary") {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
+    XDG_CONFIG_HOME: join(home, ".config"),
     APPDATA: join(home, "AppData", "Roaming"),
     LOCALAPPDATA: join(home, "AppData", "Local"),
     CODEX_HOME: codexHome,
@@ -97,6 +98,32 @@ function expectEnvelope(
 }
 
 describe("MCPGet built CLI agent workflow", () => {
+  it.runIf(process.platform === "linux")(
+    "isolates Claude configuration from an inherited XDG_CONFIG_HOME",
+    async () => {
+      vi.stubEnv("XDG_CONFIG_HOME", join(tmpdir(), "unrelated-xdg-config"));
+      try {
+        const isolated = await isolatedEnvironment();
+        const configPath = isolated.env.MCPGET_CLAUDE_CONFIG_PATH;
+        await mkdir(join(configPath, ".."), { recursive: true });
+        await writeFile(
+          configPath,
+          JSON.stringify({ mcpServers: { fixture: { command: "node" } } }),
+        );
+
+        const result = run(["list", "claude", "--json"], isolated.env);
+        expect(result.status).toBe(0);
+        const payload = parseJson(result);
+        expectEnvelope(payload, "list", true);
+        expect(payload.data.servers).toMatchObject([
+          { name: "fixture", configPath },
+        ]);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
   it("installs Copilot project scope without changing user or unrelated project state", async () => {
     const isolated = await isolatedEnvironment("primary");
     const project = join(isolated.home, "workspace");
